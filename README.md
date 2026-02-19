@@ -41,3 +41,11 @@ docker compose up --build
 ## Notes
 - Delete option in admin row actions is implemented as a commented button in UI for future enablement.
 - Compliance-related features are scaffold-ready and can be activated later.
+
+## Docker troubleshooting
+- If backend image build fails at `RUN npx prisma generate`, rebuild with no cache after pulling latest changes:
+  ```bash
+  docker compose build --no-cache backend
+  docker compose up --build
+  ```
+- This repo now sets a build-time `DATABASE_URL` in `backend/Dockerfile` so Prisma can generate its client during image build.
