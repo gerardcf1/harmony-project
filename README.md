@@ -1,51 +1,78 @@
-# Harmony Project
+# Harmony Factor
 
-Monorepo with a separated frontend and backend for the Harmony Factor platform.
+A polished, responsive full-stack wellness scoring platform with a modern landing page, combined auth flow, user analytics dashboard, and protected admin controls.
 
 ## Stack
-- Frontend: Next.js + TailwindCSS + Recharts
-- Backend: Express + TypeScript + Prisma
-- DB: PostgreSQL
-- Auth: JWT access + refresh
-- Local email simulation: Maildev via Docker
+- **Frontend**: Next.js (App Router), Tailwind CSS, Recharts
+- **Backend**: Express + TypeScript + Prisma
+- **Database**: PostgreSQL
+- **Auth**: JWT (email/password) + role-based authorization (USER/ADMIN)
+- **Containers**: Docker Compose
 
-## Folder structure
-- `frontend/`: user and admin UI
-- `backend/`: API, auth, scoring, persistence
-- `docs/`: architecture and future toggles
+## Final structure
+- `frontend/`
+  - `app/` routes/pages
+  - `components/` UI shells
+  - `lib/` API client/helpers
+- `backend/`
+  - `src/routes` auth/forms/admin APIs
+  - `src/config` env feature flags
+  - `prisma/` schema + seed data
 
-## Quick start
+## One-command local run
 ```bash
 docker compose up --build
 ```
 
-### Demo credentials
+Frontend: http://localhost:3000  
+Backend API: http://localhost:8000  
+Health: http://localhost:8000/health
+
+## Environment variables
+### Frontend (`frontend/.env`)
+- `NEXT_PUBLIC_API_URL=http://localhost:8000`
+
+### Backend (`backend/.env`)
+- `PORT=8000`
+- `DATABASE_URL=postgresql://postgres:postgres@postgres:5432/harmony`
+- `JWT_SECRET=super-secret`
+- `JWT_REFRESH_SECRET=super-refresh-secret`
+- `FRONTEND_ORIGIN=http://localhost:3000`
+- `APP_URL=http://localhost:3000`
+- `ENABLE_EMAIL=false`
+- `ENABLE_PDF_EXPORT=false`
+
+## Demo/seed credentials
 - Admin: `admin@harmony.local` / `Password123!`
 - User: `user@harmony.local` / `Password123!`
 
-## API overview
-- `POST /auth/register`
-- `POST /auth/login`
-- `POST /auth/refresh`
-- `POST /auth/request-reset`
-- `POST /auth/reset-password`
-- `GET /forms/my-assigned`
-- `POST /forms/:formId/submit`
-- `GET /forms/my-submissions`
-- `POST /forms` (admin)
-- `GET /admin/users` (admin)
-- `PATCH /admin/users/:userId/block` (admin)
-- `POST /admin/assign-form` (admin)
-- `GET /admin/export/csv` (admin)
+Seed runs automatically in Docker startup.
 
-## Notes
-- Delete option in admin row actions is implemented as a commented button in UI for future enablement.
-- Compliance-related features are scaffold-ready and can be activated later.
+### Reseed or wipe data
+```bash
+docker compose exec backend npm run seed
+```
+To wipe, remove volume and restart:
+```bash
+docker compose down -v
+docker compose up --build
+```
 
-## Docker troubleshooting
-- If backend image build fails at `RUN npx prisma generate`, rebuild with no cache after pulling latest changes:
+## API base URL flow (critical)
+Browser calls use `NEXT_PUBLIC_API_URL` from `frontend/lib/api.ts`, so client-side requests go to `http://localhost:8000` (not Docker service DNS). Internal container networking is only used by backend↔postgres.
+
+## Features delivered
+- Landing page with polished hero + CTA to one combined auth page.
+- Combined login/sign-up with email/password JWT auth.
+- User dashboard with stats cards, backend connection status, trend chart, category breakdown chart, and form submission actions.
+- Protected admin dashboard with user management, block/unblock, assignment, category weight tuning, submission deletion, search/filter/column visibility, CSV + Excel export, PDF export feature-flag stub.
+- Backend feature flags and placeholders for email verification/reset delivery (`ENABLE_EMAIL=false` default; dev token links logged).
+
+## Troubleshooting
+- **CORS**: ensure `FRONTEND_ORIGIN=http://localhost:3000` in backend env.
+- **Wrong API port**: ensure `NEXT_PUBLIC_API_URL=http://localhost:8000`.
+- **Prisma mismatch**: rebuild backend image with no cache:
   ```bash
   docker compose build --no-cache backend
   docker compose up --build
   ```
-- This repo now sets a build-time `DATABASE_URL` in `backend/Dockerfile` so Prisma can generate its client during image build.
