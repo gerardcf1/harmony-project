@@ -1,85 +1,115 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { api } from '../../lib/api';
-import { LineChart, Line, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { api, authHeaders, getSession } from '../../lib/api';
+import { BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line } from 'recharts';
+import { useRouter } from 'next/navigation';
+import { DashboardShell } from '../../components/DashboardShell';
 
-type Submission = { id: string; normalizedScore: number; label: string; createdAt: string; form: { title: string } };
-
-type Data = { submissions: Submission[]; stats: { averageScore: number; totalSubmissions: number } };
+type Submission = { id: string; normalizedScore: number; label: string; createdAt: string; form: { title: string }; computedScoresJson?: Record<string, { weighted: number }> };
+type Form = { id: string; title: string; description?: string; categories: Array<{ name: string; questions: Array<{ id: string; prompt: string; answers: Array<{ id: string; label: string }> }> }> };
 
 export default function DashboardPage() {
-  const [data, setData] = useState<Data | null>(null);
-  const [forms, setForms] = useState<any[]>([]);
+  const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [forms, setForms] = useState<Form[]>([]);
+  const [stats, setStats] = useState({ averageScore: 0, totalSubmissions: 0 });
+  const [backendOk, setBackendOk] = useState(false);
+  const router = useRouter();
+
+  async function load() {
+    const session = getSession();
+    if (!session) return router.push('/auth');
+    if (session.role === 'ADMIN') return router.push('/admin');
+
+    const headers = authHeaders();
+    const health = await api('/health');
+    setBackendOk(health.ok);
+
+    const mySubsRes = await api('/forms/my-submissions', { headers });
+    if (mySubsRes.status === 401 || mySubsRes.status === 403) return router.push('/auth');
+    const mySubsJson = await mySubsRes.json();
+    setSubmissions(mySubsJson.submissions);
+    setStats(mySubsJson.stats);
+
+    const formRes = await api('/forms/my-assigned', { headers });
+    setForms(await formRes.json());
+  }
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    const headers = { Authorization: `Bearer ${token}` };
-    api('/forms/my-submissions', { headers }).then((r) => r.json()).then(setData);
-    api('/forms/my-assigned', { headers }).then((r) => r.json()).then(setForms);
+    load();
   }, []);
 
-  const chartData = useMemo(
-    () => data?.submissions.slice().reverse().map((s, i) => ({ n: i + 1, score: s.normalizedScore })) ?? [],
-    [data],
-  );
+  const trendData = useMemo(() => submissions.slice().reverse().map((s, i) => ({ n: i + 1, score: s.normalizedScore })), [submissions]);
 
-  async function submitQuick(formId: string, questionId: string, answerOptionId: string) {
-    const token = localStorage.getItem('token');
+  const categoryData = useMemo(() => {
+    const map: Record<string, number> = {};
+    submissions.forEach((s) => {
+      Object.entries(s.computedScoresJson ?? {}).forEach(([k, v]) => {
+        map[k] = (map[k] ?? 0) + v.weighted;
+      });
+    });
+    return Object.entries(map).map(([name, score]) => ({ name, score: Number(score.toFixed(2)) }));
+  }, [submissions]);
+
+  async function submitSingle(formId: string, questionId: string, answerOptionId: string) {
     await api(`/forms/${formId}/submit`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
+      headers: authHeaders(),
       body: JSON.stringify({ responses: [{ questionId, answerOptionId }] }),
     });
-    location.reload();
+    load();
   }
 
   return (
-    <main className="mx-auto max-w-6xl px-6 py-10">
-      <h1 className="text-3xl font-bold">User Dashboard</h1>
-      <div className="mt-6 grid gap-4 md:grid-cols-3">
-        <div className="rounded-xl bg-slate-900 p-4">Average Score: {data?.stats.averageScore ?? 0}</div>
-        <div className="rounded-xl bg-slate-900 p-4">Submissions: {data?.stats.totalSubmissions ?? 0}</div>
-        <div className="rounded-xl bg-slate-900 p-4">Assigned Forms: {forms.length}</div>
-      </div>
-      <div className="mt-6 rounded-xl bg-slate-900 p-4">
-        <h2 className="mb-4 text-xl font-semibold">Progress Trend</h2>
-        <div className="h-60">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData}>
-              <CartesianGrid stroke="#334155" />
-              <XAxis dataKey="n" />
-              <YAxis />
-              <Tooltip />
-              <Line type="monotone" dataKey="score" stroke="#818cf8" />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      </div>
-      <section className="mt-6 rounded-xl bg-slate-900 p-4">
-        <h2 className="text-xl font-semibold">Generate and Fill New Form</h2>
-        <div className="mt-4 space-y-4">
-          {forms.map((form) => (
-            <div className="rounded-lg border border-slate-700 p-3" key={form.id}>
-              <p className="font-semibold">{form.title}</p>
-              <p className="text-sm text-slate-400">{form.description}</p>
-              {form.categories[0]?.questions[0] && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {form.categories[0].questions[0].answers.map((ans: any) => (
-                    <button
-                      key={ans.id}
-                      className="rounded bg-indigo-600 px-3 py-1 text-sm"
-                      onClick={() => submitQuick(form.id, form.categories[0].questions[0].id, ans.id)}
-                    >
-                      {ans.label}
-                    </button>
-                  ))}
-                </div>
-              )}
+    <DashboardShell>
+      <main className="space-y-4">
+        <section className="grid gap-4 md:grid-cols-4">
+          <div className="rounded-2xl border bg-white p-4 shadow-sm">Average Score: <strong>{stats.averageScore}</strong></div>
+          <div className="rounded-2xl border bg-white p-4 shadow-sm">Submissions: <strong>{stats.totalSubmissions}</strong></div>
+          <div className="rounded-2xl border bg-white p-4 shadow-sm">Assigned Forms: <strong>{forms.length}</strong></div>
+          <div className="rounded-2xl border bg-white p-4 shadow-sm">Backend: <strong className={backendOk ? 'text-emerald-600' : 'text-rose-600'}>{backendOk ? 'Connected' : 'Down'}</strong></div>
+        </section>
+
+        <section className="grid gap-4 lg:grid-cols-2">
+          <div className="rounded-2xl border bg-white p-4 shadow-sm">
+            <h2 className="mb-3 text-lg font-semibold">Progress trend</h2>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={trendData}><CartesianGrid stroke="#e2e8f0" /><XAxis dataKey="n" /><YAxis /><Tooltip /><Line type="monotone" dataKey="score" stroke="#4f46e5" /></LineChart>
+              </ResponsiveContainer>
             </div>
-          ))}
-        </div>
-      </section>
-    </main>
+          </div>
+          <div className="rounded-2xl border bg-white p-4 shadow-sm">
+            <h2 className="mb-3 text-lg font-semibold">Category weighted totals</h2>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={categoryData}><CartesianGrid stroke="#e2e8f0" /><XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-20} textAnchor="end" height={60} /><YAxis /><Tooltip /><Bar dataKey="score" fill="#0ea5e9" /></BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </section>
+
+        <section className="rounded-2xl border bg-white p-4 shadow-sm">
+          <h2 className="text-lg font-semibold">Generate/fill forms</h2>
+          <div className="mt-4 space-y-4">
+            {forms.map((form) => (
+              <div key={form.id} className="rounded-xl border p-3">
+                <p className="font-semibold text-slate-900">{form.title}</p>
+                <p className="text-sm text-slate-500">{form.description}</p>
+                {form.categories[0]?.questions[0] && (
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {form.categories[0].questions[0].answers.map((ans) => (
+                      <button key={ans.id} onClick={() => submitSingle(form.id, form.categories[0].questions[0].id, ans.id)} className="rounded-lg bg-indigo-600 px-3 py-1 text-sm text-white">
+                        {ans.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </section>
+      </main>
+    </DashboardShell>
   );
 }

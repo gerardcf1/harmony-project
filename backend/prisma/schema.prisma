@@ -85,16 +85,18 @@ model Assignment {
 }
 
 model Submission {
-  id              String      @id @default(cuid())
-  userId          String
-  user            User        @relation(fields: [userId], references: [id], onDelete: Cascade)
-  formId          String
-  form            Form        @relation(fields: [formId], references: [id], onDelete: Cascade)
-  totalScore      Float
-  normalizedScore Float
-  label           String
-  createdAt       DateTime    @default(now())
-  responses       Response[]
+  id                 String      @id @default(cuid())
+  userId             String
+  user               User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  formId             String
+  form               Form        @relation(fields: [formId], references: [id], onDelete: Cascade)
+  totalScore         Float
+  normalizedScore    Float
+  label              String
+  answersJson        Json?
+  computedScoresJson Json?
+  createdAt          DateTime    @default(now())
+  responses          Response[]
 }
 
 model Response {

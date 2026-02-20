@@ -10,32 +10,36 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
-  maildev:
-    image: maildev/maildev
-    ports:
-      - "1080:1080"
-      - "1025:1025"
-
   backend:
     build: ./backend
     environment:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/harmony
       JWT_SECRET: super-secret
       JWT_REFRESH_SECRET: super-refresh-secret
-      PORT: 4000
+      PORT: 8000
+      FRONTEND_ORIGIN: http://localhost:3000
+      APP_URL: http://localhost:3000
+      ENABLE_EMAIL: "false"
+      ENABLE_PDF_EXPORT: "false"
     ports:
-      - "4000:4000"
+      - "8000:8000"
     depends_on:
       - postgres
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
 
   frontend:
     build: ./frontend
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:4000
+      NEXT_PUBLIC_API_URL: http://localhost:8000
     ports:
       - "3000:3000"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
 
 volumes:
   pgdata:

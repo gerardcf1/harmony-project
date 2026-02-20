@@ -14,9 +14,46 @@ formsRouter.get('/my-assigned', async (req, res) => {
       isActive: true,
       OR: [{ isDefault: true }, { assignments: { some: { userId, active: true } } }],
     },
-    include: { categories: { include: { questions: { include: { answers: true } } } } },
+    include: {
+      categories: {
+        include: {
+          questions: {
+            include: { answers: true },
+          },
+        },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
   });
   res.json(assigned);
+});
+
+formsRouter.get('/:formId', async (req, res) => {
+  const form = await prisma.form.findUnique({
+    where: { id: req.params.formId },
+    include: {
+      categories: {
+        include: {
+          questions: {
+            include: { answers: true },
+          },
+        },
+      },
+      assignments: true,
+    },
+  });
+
+  if (!form) return res.status(404).json({ message: 'Form not found' });
+
+  if (
+    req.user?.role !== 'ADMIN' &&
+    !form.isDefault &&
+    !form.assignments.some((a: any) => a.userId === req.user!.userId && a.active)
+  ) {
+    return res.status(403).json({ message: 'Form not assigned' });
+  }
+
+  return res.json(form);
 });
 
 formsRouter.post('/', requireRole('ADMIN'), async (req, res) => {
@@ -29,7 +66,10 @@ formsRouter.post('/', requireRole('ADMIN'), async (req, res) => {
         name: z.string(),
         weight: z.number().positive(),
         questions: z.array(
-          z.object({ prompt: z.string(), answers: z.array(z.object({ label: z.string(), value: z.number().int() })) }),
+          z.object({
+            prompt: z.string(),
+            answers: z.array(z.object({ label: z.string(), value: z.number().int() })),
+          }),
         ),
       }),
     ),
@@ -50,13 +90,14 @@ formsRouter.post('/', requireRole('ADMIN'), async (req, res) => {
         })),
       },
     },
+    include: { categories: { include: { questions: { include: { answers: true } } } } },
   });
 
   res.status(201).json(created);
 });
 
 formsRouter.post('/:formId/submit', async (req, res) => {
-  const schema = z.object({ responses: z.array(z.object({ questionId: z.string(), answerOptionId: z.string() })) });
+  const schema = z.object({ responses: z.array(z.object({ questionId: z.string(), answerOptionId: z.string() })).min(1) });
   const { responses } = schema.parse(req.body);
 
   const answerIds = responses.map((r) => r.answerOptionId);
@@ -66,12 +107,22 @@ formsRouter.post('/:formId/submit', async (req, res) => {
   });
 
   const score = computeHarmonyScore(
-    selectedAnswers.map((ans) => ({
+    selectedAnswers.map((ans: any) => ({
       categoryWeight: ans.question.category.weight,
-      questionMax: Math.max(...ans.question.answers.map((a) => a.value)),
+      questionMax: Math.max(...ans.question.answers.map((a: any) => a.value)),
       selectedValue: ans.value,
     })),
   );
+
+  const categoryScores: Record<string, { weighted: number; raw: number; count: number }> = {};
+  selectedAnswers.forEach((ans: any) => {
+    const key = ans.question.category.name;
+    const weighted = ans.value * ans.question.category.weight;
+    categoryScores[key] = categoryScores[key] ?? { weighted: 0, raw: 0, count: 0 };
+    categoryScores[key].weighted += weighted;
+    categoryScores[key].raw += ans.value;
+    categoryScores[key].count += 1;
+  });
 
   const submission = await prisma.submission.create({
     data: {
@@ -80,6 +131,8 @@ formsRouter.post('/:formId/submit', async (req, res) => {
       totalScore: score.totalScore,
       normalizedScore: score.normalizedScore,
       label: score.label,
+      answersJson: responses,
+      computedScoresJson: categoryScores,
       responses: { create: responses },
     },
   });
@@ -88,7 +141,11 @@ formsRouter.post('/:formId/submit', async (req, res) => {
 });
 
 formsRouter.get('/my-submissions', async (req, res) => {
-  const submissions = await prisma.submission.findMany({ where: { userId: req.user!.userId }, include: { form: true }, orderBy: { createdAt: 'desc' } });
-  const average = submissions.length ? submissions.reduce((a, s) => a + s.normalizedScore, 0) / submissions.length : 0;
+  const submissions = await prisma.submission.findMany({
+    where: { userId: req.user!.userId },
+    include: { form: true },
+    orderBy: { createdAt: 'desc' },
+  });
+  const average = submissions.length ? submissions.reduce((a: number, s: any) => a + s.normalizedScore, 0) / submissions.length : 0;
   res.json({ submissions, stats: { averageScore: Number(average.toFixed(2)), totalSubmissions: submissions.length } });
 });
